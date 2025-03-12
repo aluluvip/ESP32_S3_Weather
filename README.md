@@ -26,11 +26,12 @@
 const char* ssid = "your_SSID";
 const char* password = "your_PASSWORD";
 ```
-2. 修改查询地点：在 `src/main.cpp` 文件中，将 `location` 替换为你要查询的城市名称。
+2. **修改查询地点**：在 `src/main.cpp` 文件中，将 `location` 替换为你要查询的城市名称。
+```
 // 要查询的地点
 const char* location = "your_city";
-
-3. 编译和上传：使用 PlatformIO 编译并上传项目到开发板。
+```
+3. **编译和上传**：使用 PlatformIO 编译并上传项目到开发板。
 
 
 ## 运行说明
