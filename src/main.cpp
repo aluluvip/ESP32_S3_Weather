@@ -40,7 +40,7 @@ unsigned long previousMillis = 0;
 String getCurrentWeatherCondition() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
-    String apiUrl = "https://wttr.in/" + String(location) + "?format=j2";
+    String apiUrl = "https://wttr.in/" + String(location) + "?lang=zh\&format\=j2";
     http.begin(apiUrl.c_str());
     int httpCode = http.GET();
     if (httpCode == 200) {
@@ -53,7 +53,7 @@ String getCurrentWeatherCondition() {
       JsonArray currentCondition = doc["current_condition"];
       if (!currentCondition.isNull() && currentCondition.size() > 0) {
         // 修正语法错误，去掉多余的括号
-        JsonArray weatherDesc = currentCondition[0]["weatherDesc"];
+        JsonArray weatherDesc = currentCondition[0]["lang_zh"];
         // 修正逻辑错误，使用 !weatherDesc.isNull()
         if (!weatherDesc.isNull() && weatherDesc.size() > 0)  {
           // 假设 weatherDesc[0]["value"] 是一个字符串，而不是数组
@@ -67,7 +67,7 @@ String getCurrentWeatherCondition() {
     }
     http.end();
   }
-  return "无法获取天气状况";
+  return "未知";
 }
 
 // 获取当前温度
@@ -93,7 +93,7 @@ String getCurrentTemperature() {
     }
     http.end();
   }
-  return "无法获取温度";
+  return "未知";
 }
 
 // ------------------------------开始-------------------------------
@@ -102,6 +102,16 @@ void setup(void) {
   u8g2.begin();
   u8g2.enableUTF8Print();
   u8g2.clearBuffer(); 
+  
+  // 添加初始化提示
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  u8g2.setCursor(10, 16);
+  u8g2.print("正在初始化系统...");
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.setCursor(30, 50);
+  u8g2.print("version 0.0.2");
+  u8g2.sendBuffer();
+
   // 连接到WiFi
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
@@ -116,6 +126,8 @@ void setup(void) {
   // 首次获取温度和天气状况
   cachedTemperature = getCurrentTemperature();
   cachedWeatherDesc = getCurrentWeatherCondition();
+
+  u8g2.clearBuffer(); 
 }
 // ------------------------------执行-------------------------------
 void loop(void) {
@@ -125,11 +137,18 @@ void loop(void) {
     return;
   }
 
+  // 添加中文星期数组
+  const char* days[] = {"日", "一", "二", "三", "四", "五", "六"};
+  
   char dateStringBuff[50];
   char timeStringBuff[50];
   char timeStringWithoutSec[50];
-  // 格式化日期
-  strftime(dateStringBuff, sizeof(dateStringBuff), "%Y-%m-%d.%a", &timeinfo);
+
+  // 修改日期格式
+  strftime(dateStringBuff, sizeof(dateStringBuff), "%Y-%m-%d", &timeinfo);
+  // 组合中文星期
+  String dateStr = String(dateStringBuff) + " 周" + days[timeinfo.tm_wday];
+  
   // 格式化时间
   strftime(timeStringBuff, sizeof(timeStringBuff), "%H:%M:%S", &timeinfo);
   // 格式化时间（不显示秒）
@@ -152,7 +171,7 @@ void loop(void) {
     // 第一行：显示日期
     u8g2.setFont(u8g2_font_wqy14_t_gb2312);
     u8g2.setCursor(16, 12);
-    u8g2.print(dateStringBuff);
+    u8g2.print(dateStr);  // 修改这里
     // 第二行：显示时间
     u8g2.setFont(u8g2_font_courB18_tf);
     u8g2.setCursor(6, 38); 
@@ -181,7 +200,7 @@ void loop(void) {
   do {
     u8g2.setFont(u8g2_font_wqy14_t_gb2312);
     u8g2.setCursor(10, 12); 
-    u8g2.print(String(location)+"今日天气气温");
+    u8g2.print(String(location)+"今日当前气温");
     // 天气气温
     u8g2.setFont(u8g2_font_courB18_tf);
     u8g2.setCursor(36, 38); 
@@ -206,12 +225,13 @@ void loop(void) {
   u8g2.clearBuffer(); 
   u8g2.firstPage();
   do {
+    // 标题
     u8g2.setFont(u8g2_font_wqy14_t_gb2312);
     u8g2.setCursor(10, 12); 
     u8g2.print(String(location)+"今日天气状况");
     // 天气状况
-    u8g2.setFont(u8g2_font_courB18_tf);
-    u8g2.setCursor(30, 38); 
+    u8g2.setFont(u8g2_font_wqy16_t_gb2312);
+    u8g2.setCursor(48, 38); 
     u8g2.print(cachedWeatherDesc);
     // 绘制底部栏、指示器
     u8g2.setFont(u8g2_font_wqy12_t_gb2312);
