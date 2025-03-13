@@ -108,11 +108,18 @@ void setup(void) {
   u8g2.clearBuffer(); 
 
   // 添加初始化提示
+  u8g2.drawLine(0, 0, 124, 0); // 上方框线
+  u8g2.drawLine(0, 0, 0, 64); // 左侧框线
+  u8g2.drawLine(124, 0, 124, 64); // 右侧框线
+  u8g2.drawLine(0, 63, 124, 63); // 下方框线
   u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-  u8g2.setCursor(10, 16);
-  u8g2.print("正在初始化系统...");
+  u8g2.setCursor(14, 24);
+  u8g2.print("正在初始化系统");
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  u8g2.setCursor(54, 40);
+  u8g2.print("...");
   u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-  u8g2.setCursor(26, 50);
+  u8g2.setCursor(26, 58);
   u8g2.print("Version 0.0.2");
   u8g2.sendBuffer();
 
@@ -136,6 +143,21 @@ void setup(void) {
   u8g2.clearBuffer(); 
 }
 // ------------------------------执行-------------------------------
+
+// 新增函数：获取格式化日期字符串
+String getFormattedDate(struct tm timeinfo) {
+  char dateStringBuff[50];
+  strftime(dateStringBuff, sizeof(dateStringBuff), "%Y-%m-%d", &timeinfo);
+  return String(dateStringBuff);
+}
+
+// 新增函数：获取中文星期字符串
+String getChineseWeekday(struct tm timeinfo) {
+  const char* days[] = {"日", "一", "二", "三", "四", "五", "六"};
+  return "星期" + String(days[timeinfo.tm_wday]);
+}
+
+// 修改原代码
 void loop(void) {
   struct tm timeinfo;
   if(!getLocalTime(&timeinfo)){
@@ -143,17 +165,11 @@ void loop(void) {
     return;
   }
 
-  // 添加中文星期数组
-  const char* days[] = {"日", "一", "二", "三", "四", "五", "六"};
+  // 使用新函数组合日期和星期
+  String dateStr = getFormattedDate(timeinfo) + " " + getChineseWeekday(timeinfo);
 
-  char dateStringBuff[50];
   char timeStringBuff[50];
   char timeStringWithoutSec[50];
-
-  // 修改日期格式
-  strftime(dateStringBuff, sizeof(dateStringBuff), "%Y-%m-%d", &timeinfo);
-  // 组合中文星期
-  String dateStr = String(dateStringBuff) + " 周" + days[timeinfo.tm_wday];
 
   // 格式化时间
   strftime(timeStringBuff, sizeof(timeStringBuff), "%H:%M:%S", &timeinfo);
@@ -188,100 +204,130 @@ void loop(void) {
     switch (currentPage) {
       case 0:
         // ------------------------第一页：显示日期时间----------------------------------
-        // 第一行：显示日期
+        // 显示日期
         u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-        u8g2.setCursor(16, 12);
-        u8g2.print(dateStr);  
-        // 第二行：显示时间
+        u8g2.setCursor(5, 15);
+        u8g2.print(getFormattedDate(timeinfo));  
+        // 显示星期
+        u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+        u8g2.setCursor(81, 16);
+        u8g2.print(getChineseWeekday(timeinfo));
+        // 日期时间分割线
+        u8g2.drawLine(77, 0, 77, 20);
+        // 显示时间
         u8g2.setFont(u8g2_font_courB18_tf);
-        u8g2.setCursor(6, 38); 
+        u8g2.setCursor(3, 42); 
         u8g2.print(timeStringBuff);
         // 底部栏信息
-        u8g2.drawLine(4, 48, 124, 48); // 从(0,55)到(128,55)画一条横线
+        u8g2.drawLine(0, 20, 124, 20); // 上方分割线
+        u8g2.drawLine(0, 48, 124, 48); // 下方分割线
+        u8g2.drawLine(0, 0, 124, 0); // 上方框线
+        u8g2.drawLine(0, 0, 0, 64); // 左侧框线
+        u8g2.drawLine(124, 0, 124, 64); // 右侧框线
+        u8g2.drawLine(0, 63, 124, 63); // 下方框线
         // 左下角时间
         u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2.setCursor(4, 63);
+        u8g2.setCursor(4, 60);
         u8g2.print(timeStringWithoutSec);
         // 指示器
-        u8g2.drawDisc(48, 58, 2); // 绘制一个半径为2的实心圆形，圆心坐标为(X50,Y58)
-        u8g2.drawCircle(58, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
-        u8g2.drawCircle(68, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
-        u8g2.drawCircle(78, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        u8g2.drawDisc(48, 56, 2); // 绘制一个半径为2的实心圆形，圆心坐标为(X50,Y58)
+        u8g2.drawCircle(58, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        u8g2.drawCircle(68, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        u8g2.drawCircle(78, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
         // 右下角天气温度
         u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2.setCursor(100, 63);
+        u8g2.setCursor(100, 60);
         u8g2.print(cachedTemperature);
         break;
       case 1:
         // ------------------------第二页：显示气温----------------------------------
         u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-        u8g2.setCursor(10, 12); 
+        u8g2.setCursor(7, 16); 
         u8g2.print(String(location)+"今日当前气温");
         // 天气气温
         u8g2.setFont(u8g2_font_courB18_tf);
-        u8g2.setCursor(36, 38); 
+        u8g2.setCursor(36, 42); 
         u8g2.print(cachedTemperature);
-        // 绘制底部栏、指示器
+         // 底部栏信息
+         u8g2.drawLine(0, 20, 124, 20); // 上方分割线
+         u8g2.drawLine(0, 48, 124, 48); // 下方分割线
+         u8g2.drawLine(0, 0, 124, 0); // 上方框线
+         u8g2.drawLine(0, 0, 0, 64); // 左侧框线
+         u8g2.drawLine(124, 0, 124, 64); // 右侧框线
+         u8g2.drawLine(0, 63, 124, 63); // 下方框线
+        // 指示器
         u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2.setCursor(4, 63);
+        u8g2.setCursor(4, 60);
         u8g2.print(timeStringWithoutSec);
-        u8g2.drawLine(4, 48, 124, 48); // 从(0,55)到(128,55)画一条横线
-        u8g2.drawCircle(48, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
-        u8g2.drawDisc(58, 58, 2); // 绘制一个半径为2的实心圆形，圆心坐标为(X50,Y58)
-        u8g2.drawCircle(68, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
-        u8g2.drawCircle(78, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        u8g2.drawCircle(48, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        u8g2.drawDisc(58, 56, 2); // 绘制一个半径为2的实心圆形，圆心坐标为(X50,Y58)
+        u8g2.drawCircle(68, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        u8g2.drawCircle(78, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
         // 右下角天气温度
         u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2.setCursor(100, 63);
+        u8g2.setCursor(100, 60);
         u8g2.print(cachedTemperature);
         break;
       case 2:
         // ------------------------第三页：显示天气状态----------------------------------
         // 标题
         u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-        u8g2.setCursor(10, 12); 
+        u8g2.setCursor(7, 16); 
         u8g2.print(String(location)+"今日天气状况");
         // 天气状况
         u8g2.setFont(u8g2_font_wqy16_t_gb2312);
-        u8g2.setCursor(48, 38); 
+        u8g2.setCursor(48, 40); 
         u8g2.print(cachedWeatherDesc);
-        // 绘制底部栏、指示器
+        // 底部栏信息
+        u8g2.drawLine(0, 20, 124, 20); // 上方分割线
+        u8g2.drawLine(0, 48, 124, 48); // 下方分割线
+        u8g2.drawLine(0, 0, 124, 0); // 上方框线
+        u8g2.drawLine(0, 0, 0, 64); // 左侧框线
+        u8g2.drawLine(124, 0, 124, 64); // 右侧框线
+        u8g2.drawLine(0, 63, 124, 63); // 下方框线
+        // 指示器
         u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2.setCursor(4, 63);
+        u8g2.setCursor(4, 60);
         u8g2.print(timeStringWithoutSec);
-        u8g2.drawLine(4, 48, 124, 48); // 从(0,55)到(128,55)画一条横线
-        u8g2.drawCircle(48, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
-        u8g2.drawCircle(58, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
-        u8g2.drawDisc(68, 58, 2); // 绘制一个半径为2的实心圆形，圆心坐标为(X50,Y58)
-        u8g2.drawCircle(78, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        
+        u8g2.drawCircle(48, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        u8g2.drawCircle(58, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        u8g2.drawDisc(68, 56, 2); // 绘制一个半径为2的实心圆形，圆心坐标为(X50,Y58)
+        u8g2.drawCircle(78, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
         // 右下角天气温度
         u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2.setCursor(100, 63);
+        u8g2.setCursor(100, 60);
         u8g2.print(cachedTemperature);
         break;
       case 3:
         //--------------------------第四页：显示IP地址----------------------------------
         u8g2.setFont(u8g2_font_open_iconic_www_1x_t);
-        u8g2.drawGlyph(14, 12, 0x0048);
+        u8g2.drawGlyph(14, 14, 0x0048);
         u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-        u8g2.setCursor(30, 12); 
+        u8g2.setCursor(28, 16); 
         u8g2.print("设备网络地址");
         // 显示IP地址
         u8g2.setFont(u8g2_font_courB10_tf);
-        u8g2.setCursor(4, 38); 
+        u8g2.setCursor(4, 40); 
         u8g2.print(WiFi.localIP().toString());
-        // 绘制底部栏、指示器
+        // 底部栏信息
+        u8g2.drawLine(0, 20, 124, 20); // 上方分割线
+        u8g2.drawLine(0, 48, 124, 48); // 下方分割线
+        u8g2.drawLine(0, 0, 124, 0); // 上方框线
+        u8g2.drawLine(0, 0, 0, 64); // 左侧框线
+        u8g2.drawLine(124, 0, 124, 64); // 右侧框线
+        u8g2.drawLine(0, 63, 124, 63); // 下方框线
+        // 指示器
         u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2.setCursor(4, 63);
+        u8g2.setCursor(4, 60);
         u8g2.print(timeStringWithoutSec);
-        u8g2.drawLine(4, 48, 124, 48); // 从(0,55)到(128,55)画一条横线
-        u8g2.drawCircle(48, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
-        u8g2.drawCircle(58, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
-        u8g2.drawCircle(68, 58, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
-        u8g2.drawDisc(78, 58, 2); // 绘制一个半径为2的实心圆形，圆心坐标为(X50,Y58)
+        u8g2.drawCircle(48, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        u8g2.drawCircle(58, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        u8g2.drawCircle(68, 56, 2);  // 绘制一个半径为2的圆形，圆心坐标为(X60,Y58)
+        u8g2.drawDisc(78, 56, 2); // 绘制一个半径为2的实心圆形，圆心坐标为(X50,Y58)
         // 右下角天气温度
         u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-        u8g2.setCursor(100, 63);
+        u8g2.setCursor(100, 60);
         u8g2.print(cachedTemperature);
         break;
     }
