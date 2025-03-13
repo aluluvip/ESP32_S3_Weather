@@ -36,7 +36,7 @@ const unsigned long interval = 10 * 60 * 1000;
 unsigned long previousMillis = 0;
 
 // 定义按钮引脚
-const int buttonPin = 2;
+const int buttonPin = 5;
 // 定义当前页面
 int currentPage = 0;
 
