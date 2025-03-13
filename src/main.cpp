@@ -261,9 +261,11 @@ void loop(void) {
         break;
       case 3:
         //--------------------------第四页：显示IP地址----------------------------------
+        u8g2.setFont(u8g2_font_open_iconic_www_1x_t);
+        u8g2.drawGlyph(14, 12, 0x0048);
         u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-        u8g2.setCursor(10, 12); 
-        u8g2.print("设备目前网络地址");
+        u8g2.setCursor(30, 12); 
+        u8g2.print("设备网络地址");
         // 显示IP地址
         u8g2.setFont(u8g2_font_courB10_tf);
         u8g2.setCursor(4, 38); 
