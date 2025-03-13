@@ -44,23 +44,19 @@ int currentPage = 0;
 String getCurrentWeatherCondition() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
-    String apiUrl = "https://wttr.in/" + String(location) + "?lang=zh\&format\=j2";
+    String apiUrl = "https://wttr.in/" + String(location) + "?lang=zh&format=j2";
     http.begin(apiUrl.c_str());
     int httpCode = http.GET();
     if (httpCode == 200) {
       String payload = http.getString();
 
-      // 避免使用弃用的 DynamicJsonDocument，改用 StaticJsonDocument
-      StaticJsonDocument<1024> doc;
+      JsonDocument doc;
       deserializeJson(doc, payload);
 
       JsonArray currentCondition = doc["current_condition"];
       if (!currentCondition.isNull() && currentCondition.size() > 0) {
-        // 修正语法错误，去掉多余的括号
         JsonArray weatherDesc = currentCondition[0]["lang_zh"];
-        // 修正逻辑错误，使用 !weatherDesc.isNull()
         if (!weatherDesc.isNull() && weatherDesc.size() > 0)  {
-          // 假设 weatherDesc[0]["value"] 是一个字符串，而不是数组
           String langData = weatherDesc[0]["value"].as<String>();
           if (!langData.isEmpty()) {
             cachedWeatherDesc = langData;
@@ -84,8 +80,7 @@ String getCurrentTemperature() {
     if (httpCode == 200) {
       String payload = http.getString();
 
-      // 避免使用弃用的 DynamicJsonDocument，改用 StaticJsonDocument
-      StaticJsonDocument<1024> doc;
+      JsonDocument doc;
       deserializeJson(doc, payload);
 
       JsonArray currentCondition = doc["current_condition"];
@@ -116,11 +111,11 @@ void setup(void) {
   u8g2.setCursor(14, 24);
   u8g2.print("正在初始化系统");
   u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-  u8g2.setCursor(54, 40);
+  u8g2.setCursor(54, 37);
   u8g2.print("...");
   u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-  u8g2.setCursor(26, 58);
-  u8g2.print("Version 0.0.2");
+  u8g2.setCursor(26, 50);
+  u8g2.print("Version 0.0.3");
   u8g2.sendBuffer();
 
   // 连接到WiFi
