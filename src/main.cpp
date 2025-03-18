@@ -40,7 +40,7 @@ const int buttonPin = 5;
 // 定义当前页面
 int currentPage = 0;
 
-// 获取当前天气状况（中文）
+// 获取当前天气状况
 String getCurrentWeatherCondition() {
   if (WiFi.status() == WL_CONNECTED) {
     HTTPClient http;
@@ -55,7 +55,8 @@ String getCurrentWeatherCondition() {
 
       JsonArray currentCondition = doc["current_condition"];
       if (!currentCondition.isNull() && currentCondition.size() > 0) {
-        JsonArray weatherDesc = currentCondition[0]["lang_zh"];
+        JsonArray weatherDesc = currentCondition[0]["lang_zh"]; // 中文获取lang_zh
+        // JsonArray weatherDesc = currentCondition[0]["weatherDesc"]; // 英文获取weatherDesc
         if (!weatherDesc.isNull() && weatherDesc.size() > 0)  {
           String langData = weatherDesc[0]["value"].as<String>();
           if (!langData.isEmpty()) {
@@ -269,10 +270,16 @@ void loop(void) {
         u8g2.setFont(u8g2_font_wqy14_t_gb2312);
         u8g2.setCursor(7, 16); 
         u8g2.print(String(location)+"今日天气状况");
-        // 天气状况
+        // 天气状况（中文时）
         u8g2.setFont(u8g2_font_wqy16_t_gb2312);
         u8g2.setCursor(48, 40); 
         u8g2.print(cachedWeatherDesc);
+
+        // 天气状况（英文时）
+        // u8g2.setFont(u8g2_font_courB18_tf);
+        // u8g2.setCursor(20, 42);
+        // u8g2.print(cachedWeatherDesc);
+
         // 底部栏信息
         u8g2.drawLine(0, 20, 124, 20); // 上方分割线
         u8g2.drawLine(0, 48, 124, 48); // 下方分割线
