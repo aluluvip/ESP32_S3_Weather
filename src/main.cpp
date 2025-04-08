@@ -110,13 +110,13 @@ void setup(void) {
   u8g2.drawLine(0, 63, 124, 63); // 下方框线
   u8g2.setFont(u8g2_font_wqy14_t_gb2312);
   u8g2.setCursor(14, 24);
-  u8g2.print("正在初始化系统");
+  u8g2.print("天气与时钟系统");
   u8g2.setFont(u8g2_font_wqy14_t_gb2312);
   u8g2.setCursor(54, 37);
   u8g2.print("...");
   u8g2.setFont(u8g2_font_wqy12_t_gb2312);
   u8g2.setCursor(26, 50);
-  u8g2.print("Version 0.0.3");
+  u8g2.print("Version 0.0.4");
   u8g2.sendBuffer();
 
   // 连接到WiFi
@@ -138,7 +138,6 @@ void setup(void) {
   pinMode(buttonPin, INPUT_PULLUP);
   u8g2.clearBuffer(); 
 }
-// ------------------------------执行-------------------------------
 
 // 新增函数：获取格式化日期字符串
 String getFormattedDate(struct tm timeinfo) {
@@ -153,7 +152,7 @@ String getChineseWeekday(struct tm timeinfo) {
   return "星期" + String(days[timeinfo.tm_wday]);
 }
 
-// 修改原代码
+// ------------------------------执行-------------------------------
 void loop(void) {
   struct tm timeinfo;
   if(!getLocalTime(&timeinfo)){
