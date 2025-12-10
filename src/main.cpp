@@ -501,34 +501,52 @@ void loop(void) {
               drawBottomInfo(0);
               break;
             case 1:
-              // ------------------------第二页：显示气温----------------------------------
+            {
+              // ------------------------第二页：显示当前天气----------------------------------
+              // 顶部标题：{地点}目前天气，左右动态居中
               u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-              u8g2.setCursor(7, 16); 
-              u8g2.print(String(location)+"今日当前气温");
-              // 天气气温
-              u8g2.setFont(u8g2_font_courB18_tf);
-              u8g2.setCursor(36, 42); 
-              u8g2.print(cachedTemperature);
+              String title = String(location) + "目前天气";
+              int titleWidth = u8g2.getUTF8Width(title.c_str());
+              int titleX = (128 - titleWidth) / 2;
+              u8g2.setCursor(titleX, 16); 
+              u8g2.print(title);
+              
+              // 中间显示内容：天气状况|温度|湿度，根据屏幕宽度自动居中
+              u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+              String weatherInfo = cachedWeatherDesc + "|" + cachedTemperature + "|" + cachedHumidity;
+              int weatherInfoWidth = u8g2.getUTF8Width(weatherInfo.c_str());
+              int weatherInfoX = (128 - weatherInfoWidth) / 2;
+              u8g2.setCursor(weatherInfoX, 40); 
+              u8g2.print(weatherInfo);
+              
               // 绘制通用边框和分割线
               drawCommonBorder();
               // 绘制底部信息
               drawBottomInfo(1);
               break;
+            }
             case 2:
-              // ------------------------第三页：显示天气状态----------------------------------
-              // 标题
+            {
+              // ------------------------第三页：规划中----------------------------------
+              // 顶部标题：规划中...
               u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-              u8g2.setCursor(7, 16); 
-              u8g2.print(String(location)+"今日天气状况");
-              // 天气状况（中文时）
+              String placeholder = "规划中...";
+              int placeholderWidth = u8g2.getUTF8Width(placeholder.c_str());
+              int placeholderX = (128 - placeholderWidth) / 2;
+              u8g2.setCursor(placeholderX, 16); 
+              u8g2.print(placeholder);
+              
+              // 中间内容：规划中...
               u8g2.setFont(u8g2_font_wqy16_t_gb2312);
-              u8g2.setCursor(48, 40); 
-              u8g2.print(cachedWeatherDesc);
+              u8g2.setCursor(placeholderX, 40); 
+              u8g2.print(placeholder);
+              
               // 绘制通用边框和分割线
               drawCommonBorder();
               // 绘制底部信息
               drawBottomInfo(2);
               break;
+            }
             case 3:
               //--------------------------第四页：显示IP地址----------------------------------
               u8g2.setFont(u8g2_font_open_iconic_www_1x_t);
@@ -598,39 +616,52 @@ void loop(void) {
           drawBottomInfo(0);
           break;
         case 1:
-          // ------------------------第二页：显示气温----------------------------------
+        {
+          // ------------------------第二页：显示当前天气----------------------------------
+          // 顶部标题：{地点}目前天气，左右动态居中
           u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-          u8g2.setCursor(7, 16); 
-          u8g2.print(String(location)+"今日当前气温");
-          // 天气气温
-          u8g2.setFont(u8g2_font_courB18_tf);
-          u8g2.setCursor(36, 42); 
-          u8g2.print(cachedTemperature);
+          String title = String(location) + "目前天气";
+          int titleWidth = u8g2.getUTF8Width(title.c_str());
+          int titleX = (128 - titleWidth) / 2;
+          u8g2.setCursor(titleX, 16); 
+          u8g2.print(title);
+          
+          // 中间显示内容：天气状况|温度|湿度，根据屏幕宽度自动居中
+          u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+          String weatherInfo = cachedWeatherDesc + "|" + cachedTemperature + "|" + cachedHumidity;
+          int weatherInfoWidth = u8g2.getUTF8Width(weatherInfo.c_str());
+          int weatherInfoX = (128 - weatherInfoWidth) / 2;
+          u8g2.setCursor(weatherInfoX, 40); 
+          u8g2.print(weatherInfo);
+          
           // 绘制通用边框和分割线
           drawCommonBorder();
           // 绘制底部信息
           drawBottomInfo(1);
           break;
-        case 2:
-        {
-          // ------------------------第三页：显示天气状态----------------------------------
-          // 标题
-          u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-          u8g2.setCursor(7, 16); 
-          u8g2.print(String(location)+"今日天气状况");
-          // 天气状况（中文时）
-          u8g2.setFont(u8g2_font_wqy16_t_gb2312);
-          // 计算文字宽度，实现居中显示
-          int textWidth = u8g2.getUTF8Width(cachedWeatherDesc.c_str());
-          int x = (128 - textWidth) / 2; // 屏幕宽度128，减去文字宽度后除以2
-          u8g2.setCursor(x, 40); 
-          u8g2.print(cachedWeatherDesc);
-          // 绘制通用边框和分割线
-          drawCommonBorder();
-          // 绘制底部信息
-          drawBottomInfo(2);
-          break;
         }
+        case 2:
+            {
+              // ------------------------第三页：规划中----------------------------------
+              // 顶部标题：规划中...
+              u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+              String placeholder = "规划中...";
+              int placeholderWidth = u8g2.getUTF8Width(placeholder.c_str());
+              int placeholderX = (128 - placeholderWidth) / 2;
+              u8g2.setCursor(placeholderX, 16); 
+              u8g2.print(placeholder);
+              
+              // 中间内容：规划中...
+              u8g2.setFont(u8g2_font_wqy16_t_gb2312);
+              u8g2.setCursor(placeholderX, 40); 
+              u8g2.print(placeholder);
+              
+              // 绘制通用边框和分割线
+              drawCommonBorder();
+              // 绘制底部信息
+              drawBottomInfo(2);
+              break;
+            }
         case 3:
           //--------------------------第四页：显示IP地址----------------------------------
           u8g2.setFont(u8g2_font_open_iconic_www_1x_t);
