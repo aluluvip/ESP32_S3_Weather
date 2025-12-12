@@ -122,6 +122,7 @@ String cachedWeatherDesc;
 String cachedTemperature;
 String cachedHumidity;
 String cachedFeelsLike;
+String cachedPoem; // 每日诗词缓存
 
 // 定义更新天气气温和状况的时间间隔（10分钟，单位：毫秒）
 const unsigned long interval = 10 * 60 * 1000;
@@ -132,6 +133,10 @@ const int buttonPin = 5;
 // 定义当前页面
 int currentPage = 0;
 
+// 每日诗词滚动相关变量
+int scrollPosition = 0; // 滚动位置
+unsigned long lastScrollTime = 0; // 上次滚动时间
+const long scrollInterval = 80; // 滚动间隔（毫秒），速度更快
 // 加载配置
 void loadConfig() {
   preferences.begin("oled_weather", false);
@@ -263,6 +268,36 @@ bool getAllWeatherData() {
   return false;
 }
 
+// 获取每日诗词
+bool getDailyPoem() {
+  if (WiFi.status() == WL_CONNECTED) {
+    HTTPClient http;
+    // 使用今日诗词API获取每日一句
+    String apiUrl = "https://v2.jinrishici.com/one.json";
+    http.begin(apiUrl.c_str());
+    http.addHeader("Content-Type", "application/json");
+    int httpCode = http.GET();
+    
+    if (httpCode == 200) {
+      String payload = http.getString();
+      JsonDocument doc;
+      deserializeJson(doc, payload);
+      
+      // 解析诗词数据
+      JsonObject data = doc["data"];
+      if (!data.isNull()) {
+        String content = data["content"].as<String>();
+        if (!content.isEmpty()) {
+          cachedPoem = content;
+          return true;
+        }
+      }
+    }
+    http.end();
+  }
+  return false;
+}
+
 // 获取当前小时的天气状况
 String getCurrentWeatherCondition() {
   return cachedWeatherDesc.isEmpty() ? "未知" : cachedWeatherDesc;
@@ -291,19 +326,19 @@ void setup(void) {
   u8g2.clearBuffer(); 
 
   // 添加初始化提示
-  u8g2.drawLine(0, 0, 124, 0); // 上方框线
+  u8g2.drawLine(0, 0, 127, 0); // 上方框线
   u8g2.drawLine(0, 0, 0, 64); // 左侧框线
-  u8g2.drawLine(124, 0, 124, 64); // 右侧框线
-  u8g2.drawLine(0, 63, 124, 63); // 下方框线
+  u8g2.drawLine(127, 0, 127, 64); // 右侧框线
+  u8g2.drawLine(0, 63, 127, 63); // 下方框线
   u8g2.setFont(u8g2_font_wqy14_t_gb2312);
   u8g2.setCursor(14, 24);
-  u8g2.print("天气与时钟系统");
+  u8g2.print("小方盒信息系统");
   u8g2.setFont(u8g2_font_wqy14_t_gb2312);
   u8g2.setCursor(54, 37);
   u8g2.print("...");
   u8g2.setFont(u8g2_font_wqy12_t_gb2312);
   u8g2.setCursor(26, 50);
-  u8g2.print("Version 0.0.5");
+  u8g2.print("Version 0.0.6");
   u8g2.sendBuffer();
 
   // 加载配置
@@ -322,6 +357,8 @@ void setup(void) {
       
       // 首次统一获取所有天气数据
       getAllWeatherData();
+      // 首次获取每日诗词
+      getDailyPoem();
     } else {
       Serial.println("\nWiFi连接失败，进入配置模式");
       config_mode = true;
@@ -418,12 +455,138 @@ void drawBottomInfo(int activePage) {
 
 // 绘制通用边框和分割线
 void drawCommonBorder() {
-  u8g2.drawLine(0, 0, 124, 0); // 上方框线
+  u8g2.drawLine(0, 0, 127, 0); // 上方框线
   u8g2.drawLine(0, 0, 0, 64); // 左侧框线
-  u8g2.drawLine(124, 0, 124, 64); // 右侧框线
-  u8g2.drawLine(0, 63, 124, 63); // 下方框线
-  u8g2.drawLine(0, 20, 124, 20); // 上方分割线
-  u8g2.drawLine(0, 48, 124, 48); // 下方分割线
+  u8g2.drawLine(127, 0, 127, 64); // 右侧框线
+  u8g2.drawLine(0, 63, 127, 63); // 下方框线
+  u8g2.drawLine(0, 20, 127, 20); // 上方分割线
+  u8g2.drawLine(0, 48, 127, 48); // 下方分割线
+}
+
+// 页面绘制函数
+void drawPage0(struct tm &timeinfo, const char* timeStringBuff) {
+  // ------------------------第一页：显示日期时间----------------------------------
+  // 显示日期
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  u8g2.setCursor(5, 15);
+  u8g2.print(getFormattedDate(timeinfo));  
+  // 显示星期
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  u8g2.setCursor(83, 16);
+  u8g2.print(getChineseWeekday(timeinfo));
+  // 日期时间分割线
+  u8g2.drawLine(77, 0, 77, 20);
+  // 显示时间
+  u8g2.setFont(u8g2_font_courB18_tf);
+  u8g2.setCursor(5, 42); 
+  u8g2.print(timeStringBuff);
+  // 绘制通用边框和分割线
+  drawCommonBorder();
+  // 绘制底部信息
+  drawBottomInfo(0);
+}
+
+void drawPage1() {
+  // ------------------------第二页：显示当前天气----------------------------------
+  // 顶部标题：{地点}目前天气，左右动态居中
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  String title = String(location) + "目前天气";
+  int titleWidth = u8g2.getUTF8Width(title.c_str());
+  int titleX = (128 - titleWidth) / 2;
+  u8g2.setCursor(titleX, 16); 
+  u8g2.print(title);
+  
+  // 中间显示内容：天气状况|温度|湿度，根据屏幕宽度自动居中
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  String weatherInfo = cachedWeatherDesc + "|" + cachedTemperature + "|" + cachedHumidity;
+  int weatherInfoWidth = u8g2.getUTF8Width(weatherInfo.c_str());
+  int weatherInfoX = (128 - weatherInfoWidth) / 2;
+  u8g2.setCursor(weatherInfoX, 40); 
+  u8g2.print(weatherInfo);
+  
+  // 绘制通用边框和分割线
+  drawCommonBorder();
+  // 绘制底部信息
+  drawBottomInfo(1);
+}
+
+void drawPage2() {
+  // ------------------------第三页：每日诗词----------------------------------
+  // 顶部标题：[心形图标]每日诗词
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  String title = "每日诗词";
+  int titleWidth = u8g2.getUTF8Width(title.c_str());
+  int iconWidth = 14; // 心形图标宽度
+  int gap = 0; // 图标与标题间距，改为2像素
+  int totalWidth = titleWidth + iconWidth + gap; // 标题+图标+间距
+  int titleX = (128 - totalWidth) / 2;
+  
+  // 绘制心形图标
+  u8g2.setFont(u8g2_font_open_iconic_human_1x_t);
+  u8g2.drawGlyph(titleX, 14, 0x0042); // 心形图标，编码0x0042
+  
+  // 绘制标题
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  u8g2.setCursor(titleX + iconWidth + gap, 16); 
+  u8g2.print(title);
+  
+  // 中间内容：滚动显示每日诗词
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  String poem = cachedPoem.isEmpty() ? "加载中..." : cachedPoem;
+  int poemWidth = u8g2.getUTF8Width(poem.c_str());
+  
+  // 计算可显示宽度：屏幕总宽度128 - 左右各预留3像素 = 122像素
+  const int displayWidth = 128 - 3 - 3;
+  
+  // 更新滚动位置 - 连续更新多次，提高滚动速度
+  unsigned long currentTime = millis();
+  // 计算自上次滚动以来应该更新的次数
+  if (currentTime - lastScrollTime >= scrollInterval) {
+    // 计算需要更新的次数
+    int updateCount = (currentTime - lastScrollTime) / scrollInterval;
+    scrollPosition += updateCount;
+    lastScrollTime = currentTime;
+  }
+  
+  // 计算诗词宽度和间隔距离
+  int poemGap = 20; // 诗词之间的间隔距离（像素）
+  int totalScrollWidth = poemWidth + poemGap;
+  
+  // 计算当前显示位置
+  int currentX = 3 - (scrollPosition % totalScrollWidth);
+  
+  // 绘制诗句（主实例）
+  u8g2.setCursor(currentX, 40); 
+  u8g2.print(poem);
+  
+  // 绘制诗句（循环实例，用于无缝滚动）
+  int nextX = currentX + totalScrollWidth;
+  if (nextX < displayWidth + 3) {
+    u8g2.setCursor(nextX, 40);
+    u8g2.print(poem);
+  }
+  
+  // 绘制通用边框和分割线
+  drawCommonBorder();
+  // 绘制底部信息
+  drawBottomInfo(2);
+}
+
+void drawPage3() {
+  //--------------------------第四页：显示IP地址----------------------------------
+  u8g2.setFont(u8g2_font_open_iconic_www_1x_t);
+  u8g2.drawGlyph(14, 14, 0x0048);
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  u8g2.setCursor(28, 16); 
+  u8g2.print("设备网络地址");
+  // 显示IP地址
+  u8g2.setFont(u8g2_font_courB10_tf);
+  u8g2.setCursor(4, 40); 
+  u8g2.print(WiFi.localIP().toString());
+  // 绘制通用边框和分割线
+  drawCommonBorder();
+  // 绘制底部信息
+  drawBottomInfo(3);
 }
 
 // ------------------------------执行-------------------------------
@@ -480,88 +643,16 @@ void loop(void) {
         do {
           switch (currentPage) {
             case 0:
-              // ------------------------第一页：显示日期时间----------------------------------
-              // 显示日期
-              u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-              u8g2.setCursor(5, 15);
-              u8g2.print(getFormattedDate(timeinfo));  
-              // 显示星期
-              u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-              u8g2.setCursor(81, 16);
-              u8g2.print(getChineseWeekday(timeinfo));
-              // 日期时间分割线
-              u8g2.drawLine(77, 0, 77, 20);
-              // 显示时间
-              u8g2.setFont(u8g2_font_courB18_tf);
-              u8g2.setCursor(3, 42); 
-              u8g2.print(timeStringBuff);
-              // 绘制通用边框和分割线
-              drawCommonBorder();
-              // 绘制底部信息
-              drawBottomInfo(0);
+              drawPage0(timeinfo, timeStringBuff);
               break;
             case 1:
-            {
-              // ------------------------第二页：显示当前天气----------------------------------
-              // 顶部标题：{地点}目前天气，左右动态居中
-              u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-              String title = String(location) + "目前天气";
-              int titleWidth = u8g2.getUTF8Width(title.c_str());
-              int titleX = (128 - titleWidth) / 2;
-              u8g2.setCursor(titleX, 16); 
-              u8g2.print(title);
-              
-              // 中间显示内容：天气状况|温度|湿度，根据屏幕宽度自动居中
-              u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-              String weatherInfo = cachedWeatherDesc + "|" + cachedTemperature + "|" + cachedHumidity;
-              int weatherInfoWidth = u8g2.getUTF8Width(weatherInfo.c_str());
-              int weatherInfoX = (128 - weatherInfoWidth) / 2;
-              u8g2.setCursor(weatherInfoX, 40); 
-              u8g2.print(weatherInfo);
-              
-              // 绘制通用边框和分割线
-              drawCommonBorder();
-              // 绘制底部信息
-              drawBottomInfo(1);
+              drawPage1();
               break;
-            }
             case 2:
-            {
-              // ------------------------第三页：规划中----------------------------------
-              // 顶部标题：规划中...
-              u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-              String placeholder = "规划中...";
-              int placeholderWidth = u8g2.getUTF8Width(placeholder.c_str());
-              int placeholderX = (128 - placeholderWidth) / 2;
-              u8g2.setCursor(placeholderX, 16); 
-              u8g2.print(placeholder);
-              
-              // 中间内容：规划中...
-              u8g2.setFont(u8g2_font_wqy16_t_gb2312);
-              u8g2.setCursor(placeholderX, 40); 
-              u8g2.print(placeholder);
-              
-              // 绘制通用边框和分割线
-              drawCommonBorder();
-              // 绘制底部信息
-              drawBottomInfo(2);
+              drawPage2();
               break;
-            }
             case 3:
-              //--------------------------第四页：显示IP地址----------------------------------
-              u8g2.setFont(u8g2_font_open_iconic_www_1x_t);
-              u8g2.drawGlyph(14, 14, 0x0048);
-              u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-              u8g2.setCursor(28, 16); 
-              u8g2.print("设备网络地址");
-              // 显示IP地址
-              u8g2.setFont(u8g2_font_courB10_tf);
-              u8g2.setCursor(4, 40); 
-              u8g2.print(WiFi.localIP().toString());
-              // 绘制通用边框和分割线
-              drawCommonBorder();
-              // 绘制底部信息
-              drawBottomInfo(3);
+              drawPage3();
               break;
           }
         } while (u8g2.nextPage());
@@ -584,101 +675,30 @@ void loop(void) {
     // 获取当前时间
     unsigned long currentMillis = millis();
 
-    // 每10分钟统一更新一次所有天气数据
+    // 每10分钟统一更新一次所有天气数据和每日诗词
     if (currentMillis - previousMillis >= interval) {
       previousMillis = currentMillis;
       getAllWeatherData();
+      getDailyPoem();
     }
 
     u8g2.clearBuffer(); 
     u8g2.firstPage();
     do {
       switch (currentPage) {
-        case 0:
-          // ------------------------第一页：显示日期时间----------------------------------
-          // 显示日期
-          u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-          u8g2.setCursor(5, 15);
-          u8g2.print(getFormattedDate(timeinfo));  
-          // 显示星期
-          u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-          u8g2.setCursor(81, 16);
-          u8g2.print(getChineseWeekday(timeinfo));
-          // 日期时间分割线
-          u8g2.drawLine(77, 0, 77, 20);
-          // 显示时间
-          u8g2.setFont(u8g2_font_courB18_tf);
-          u8g2.setCursor(3, 42); 
-          u8g2.print(timeStringBuff);
-          // 绘制通用边框和分割线
-          drawCommonBorder();
-          // 绘制底部信息
-          drawBottomInfo(0);
-          break;
-        case 1:
-        {
-          // ------------------------第二页：显示当前天气----------------------------------
-          // 顶部标题：{地点}目前天气，左右动态居中
-          u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-          String title = String(location) + "目前天气";
-          int titleWidth = u8g2.getUTF8Width(title.c_str());
-          int titleX = (128 - titleWidth) / 2;
-          u8g2.setCursor(titleX, 16); 
-          u8g2.print(title);
-          
-          // 中间显示内容：天气状况|温度|湿度，根据屏幕宽度自动居中
-          u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-          String weatherInfo = cachedWeatherDesc + "|" + cachedTemperature + "|" + cachedHumidity;
-          int weatherInfoWidth = u8g2.getUTF8Width(weatherInfo.c_str());
-          int weatherInfoX = (128 - weatherInfoWidth) / 2;
-          u8g2.setCursor(weatherInfoX, 40); 
-          u8g2.print(weatherInfo);
-          
-          // 绘制通用边框和分割线
-          drawCommonBorder();
-          // 绘制底部信息
-          drawBottomInfo(1);
-          break;
-        }
-        case 2:
-            {
-              // ------------------------第三页：规划中----------------------------------
-              // 顶部标题：规划中...
-              u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-              String placeholder = "规划中...";
-              int placeholderWidth = u8g2.getUTF8Width(placeholder.c_str());
-              int placeholderX = (128 - placeholderWidth) / 2;
-              u8g2.setCursor(placeholderX, 16); 
-              u8g2.print(placeholder);
-              
-              // 中间内容：规划中...
-              u8g2.setFont(u8g2_font_wqy16_t_gb2312);
-              u8g2.setCursor(placeholderX, 40); 
-              u8g2.print(placeholder);
-              
-              // 绘制通用边框和分割线
-              drawCommonBorder();
-              // 绘制底部信息
-              drawBottomInfo(2);
+            case 0:
+              drawPage0(timeinfo, timeStringBuff);
               break;
-            }
-        case 3:
-          //--------------------------第四页：显示IP地址----------------------------------
-          u8g2.setFont(u8g2_font_open_iconic_www_1x_t);
-          u8g2.drawGlyph(14, 14, 0x0048);
-          u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-          u8g2.setCursor(28, 16); 
-          u8g2.print("设备网络地址");
-          // 显示IP地址
-          u8g2.setFont(u8g2_font_courB10_tf);
-          u8g2.setCursor(4, 40); 
-          u8g2.print(WiFi.localIP().toString());
-          // 绘制通用边框和分割线
-          drawCommonBorder();
-          // 绘制底部信息
-          drawBottomInfo(3);
-          break;
-      }
+            case 1:
+              drawPage1();
+              break;
+            case 2:
+              drawPage2();
+              break;
+            case 3:
+              drawPage3();
+              break;
+          }
     } while (u8g2.nextPage());
   }
   
