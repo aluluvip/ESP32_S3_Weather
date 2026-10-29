@@ -419,20 +419,33 @@ static String moonPhaseToZh(const String &phase) {
   return key;
 }
 
-// 用「整圆填满 + 偏移暗圆擦除」模拟月相盈亏，22~26px 直径下足够自然
+// 逐行绘制真实月相：晨昏线按椭圆弧收缩，而不是拿一个圆去硬擦
+// f=1 满月，f=0.5 上下弦，f=0 新月；k 控制晨昏线离圆心的距离
 static void drawMoonPhase(int cx, int cy, int r, int illumPct, bool waxing) {
-  if (illumPct < 0) illumPct = 0;
-  if (illumPct > 100) illumPct = 100;
+  float f = illumPct / 100.0f;
+  f = constrain(f, 0.0f, 1.0f);
+  float k = fabsf(cosf(PI * f));
 
-  u8g2.drawDisc(cx, cy, r); // 先按满月铺满
+  for (int y = -r; y <= r; y++) {
+    int w = (int)(sqrtf((float)(r * r - y * y)) + 0.5f);
+    if (w <= 0) continue;
 
-  int dx = (2 * r * illumPct) / 100; // 亮度越低，暗影圆越往中心压
-  if (dx < 2 * r) {
-    u8g2.setDrawColor(0);
-    u8g2.drawDisc(waxing ? cx - dx : cx + dx, cy, r + 1); // 背景色擦出暗面
-    u8g2.setDrawColor(1);
+    int term = (int)(w * k + 0.5f); // 晨昏线在该行的位置
+    int left, right;
+
+    if (waxing) {          // 盈月：右侧亮
+      right = w;
+      left = (f >= 0.5f) ? -term : term;
+    } else {               // 亏月：左侧亮
+      left = -w;
+      right = (f >= 0.5f) ? term : -term;
+    }
+
+    if (left > right) continue;
+    u8g2.drawLine(cx + left, cy + y, cx + right, cy + y);
   }
-  u8g2.drawCircle(cx, cy, r); // 补回月盘轮廓
+
+  u8g2.drawCircle(cx, cy, r); // 月盘轮廓
 }
 
 // 统一获取所有天气数据，减少API调用次数
@@ -922,7 +935,7 @@ void drawPage4(struct tm &timeinfo) {
 
   String sunsetText = String("日落 ") + (cachedSunset.isEmpty() ? "--" : clockTo24(cachedSunset));
   int sunsetWidth = u8g2.getUTF8Width(sunsetText.c_str());
-  u8g2.setCursor(126 - sunsetWidth, 61);
+  u8g2.setCursor(124 - sunsetWidth, 61);
   u8g2.print(sunsetText);
 }
 
