@@ -29,7 +29,7 @@ String password = "";
 String location = "北京";  // 可替换为你要查询的城市
 
 // 定义时区信息
-const char* ntpServer = "pool.ntp.org";
+const char* ntpServer = "cn.pool.ntp.org";
 const long  gmtOffset_sec = 28800; // 北京时间，东八区，偏移秒数
 const int   daylightOffset_sec = 0;
 
@@ -130,13 +130,24 @@ unsigned long previousMillis = 0;
 
 // 定义按钮引脚
 const int buttonPin = 5;
-// 定义当前页面
+// 定义当前页面（0=时间 1=天气 2=诗词 3=网络 4=日月星辰）
 int currentPage = 0;
+const int pageCount = 5;
 
 // 每日诗词滚动相关变量
-int scrollPosition = 0; // 滚动位置
-unsigned long lastScrollTime = 0; // 上次滚动时间
-const long scrollInterval = 80; // 滚动间隔（毫秒），速度更快
+unsigned long scrollPosition = 0;        // 累计滚动位移（像素）
+unsigned long lastScrollTime = 0;        // 上次滚动时间
+const unsigned long scrollInterval = 80; // 滚动间隔（毫秒）
+bool needsFullRedraw = true;             // 切页等场景需要整屏重绘
+
+// 按钮相关：消抖 + 短按切页 + 长按进配置
+const unsigned long debounceMs = 30;          // 机械按钮抖动窗口
+const unsigned long longPressDuration = 3000; // 长按3秒进入配置模式
+bool btnStable = false;                       // 消抖后的状态（true=按下）
+bool btnLastRead = false;                     // 上一次读到的原始电平
+unsigned long btnLastChange = 0;              // 原始电平最后一次变化的时间
+unsigned long btnPressStart = 0;
+bool btnLongPressFired = false;
 // 加载配置
 void loadConfig() {
   preferences.begin("oled_weather", false);
@@ -196,131 +207,380 @@ bool checkWiFiConnection() {
   return WiFi.status() == WL_CONNECTED;
 }
 
-// 获取当前小时对应的天气数据索引
-int getCurrentHourIndex() {
-  struct tm timeinfo;
-  if (!getLocalTime(&timeinfo)) {
-    return 0;
+// WiFi 掉线自动重连（非阻塞，每 15 秒最多尝试一次）
+// 返回 true 表示本次调用中刚刚恢复了连接
+bool ensureWiFi() {
+  static unsigned long lastAttempt = 0;
+  static bool linkWasUp = true;
+
+  if (WiFi.status() == WL_CONNECTED) {
+    if (!linkWasUp) {
+      linkWasUp = true;
+      Serial.println("[wifi] 连接已恢复，IP: " + WiFi.localIP().toString());
+      return true;
+    }
+    return false;
   }
-  
-  // 计算当前小时对应的索引（每3小时一个数据点，共8个数据点）
-  int hour = timeinfo.tm_hour;
-  // 0:00 -> 0, 3:00 -> 1, 6:00 -> 2, ..., 21:00 -> 7
-  int index = hour / 3;
-  return index;
+
+  unsigned long now = millis();
+  if (linkWasUp) {
+    linkWasUp = false;
+    lastAttempt = now - 20000; // 让首次检查立即触发重连
+    Serial.println("[wifi] 连接丢失，开始自动重连");
+  }
+
+  if (now - lastAttempt < 15000) {
+    return false;
+  }
+
+  lastAttempt = now;
+  Serial.println("[wifi] 尝试重连: " + ssid);
+  WiFi.disconnect();
+  WiFi.begin(ssid.c_str(), password.c_str());
+  return false;
 }
 
 
 
+// ---------------------------- 天气描述中文化 ----------------------------
+// wttr.in 的 lang_zh 字段并不完整：像 "Smoky haze"/"Clear"/"Sunny" 这类会原样
+// 返回英文字符串（还可能带尾随空格）。这里用 天气码 -> 中文 为主映射，
+// 英文描述 -> 中文 作兜底，保证屏幕上不出现英文。
+struct WeatherZhCode { int code; const char *zh; };
+static const WeatherZhCode kWeatherZhCode[] = {
+  {113, "晴"},   {116, "多云"}, {119, "阴"},   {122, "阴"},
+  {143, "薄雾"}, {149, "烟霾"}, {248, "雾"},   {260, "冻雾"},
+  {176, "局部有雨"}, {179, "局部有雪"}, {182, "局部雨夹雪"}, {185, "局部冻雨"},
+  {200, "雷暴"}, {227, "吹雪"}, {230, "暴风雪"},
+  {263, "零星毛毛雨"}, {266, "毛毛雨"}, {281, "冻毛毛雨"}, {284, "强冻毛毛雨"},
+  {293, "零星小雨"}, {296, "小雨"}, {299, "间歇中雨"}, {302, "中雨"},
+  {305, "间歇大雨"}, {308, "大雨"}, {311, "冻雨"}, {314, "强冻雨"},
+  {317, "小雨夹雪"}, {320, "雨夹雪"},
+  {323, "零星小雪"}, {326, "小雪"}, {329, "零星中雪"}, {332, "中雪"},
+  {335, "零星大雪"}, {338, "大雪"}, {350, "冰粒"},
+  {353, "小阵雨"}, {356, "阵雨"}, {359, "暴雨"},
+  {362, "阵雨夹雪"}, {365, "强阵雨夹雪"}, {368, "小阵雪"}, {371, "阵雪"},
+  {374, "小冰粒"}, {377, "冰粒"},
+  {386, "雷阵雨"}, {389, "强雷阵雨"}, {392, "雷阵雪"}, {395, "强雷阵雪"},
+};
+
+struct WeatherZhText { const char *en; const char *zh; };
+static const WeatherZhText kWeatherZhText[] = {
+  {"Clear", "晴"}, {"Sunny", "晴"}, {"Partly cloudy", "多云"},
+  {"Cloudy", "阴"}, {"Overcast", "阴"},
+  {"Mist", "薄雾"}, {"Fog", "雾"}, {"Freezing fog", "冻雾"},
+  {"Haze", "霾"}, {"Smoky haze", "烟霾"}, {"Smoke", "烟霾"},
+  {"Dust", "浮尘"}, {"Widespread dust", "大范围浮尘"},
+  {"Sand", "沙"}, {"Duststorm", "沙尘暴"}, {"Sandstorm", "沙尘暴"},
+  {"Blowing sand", "扬沙"}, {"Blowing snow", "吹雪"}, {"Blizzard", "暴风雪"},
+  {"Patchy rain nearby", "局部有雨"}, {"Patchy rain possible", "可能有雨"},
+  {"Patchy snow possible", "可能有雪"}, {"Patchy sleet possible", "可能有雨夹雪"},
+  {"Patchy freezing drizzle possible", "可能有冻毛毛雨"},
+  {"Thundery outbreaks possible", "可能有雷暴"},
+  {"Patchy light drizzle", "零星毛毛雨"}, {"Light drizzle", "毛毛雨"},
+  {"Freezing drizzle", "冻毛毛雨"}, {"Heavy freezing drizzle", "强冻毛毛雨"},
+  {"Patchy light rain", "零星小雨"}, {"Light rain", "小雨"},
+  {"Moderate rain at times", "间歇中雨"}, {"Moderate rain", "中雨"},
+  {"Heavy rain at times", "间歇大雨"}, {"Heavy rain", "大雨"},
+  {"Light freezing rain", "冻雨"}, {"Moderate or heavy freezing rain", "强冻雨"},
+  {"Light sleet", "小雨夹雪"}, {"Moderate or heavy sleet", "雨夹雪"},
+  {"Patchy light snow", "零星小雪"}, {"Light snow", "小雪"},
+  {"Patchy moderate snow", "零星中雪"}, {"Moderate snow", "中雪"},
+  {"Patchy heavy snow", "零星大雪"}, {"Heavy snow", "大雪"},
+  {"Ice pellets", "冰粒"},
+  {"Light rain shower", "小阵雨"}, {"Moderate or heavy rain shower", "阵雨"},
+  {"Torrential rain shower", "暴雨"},
+  {"Light sleet showers", "阵雨夹雪"}, {"Moderate or heavy sleet showers", "强阵雨夹雪"},
+  {"Light snow showers", "小阵雪"}, {"Moderate or heavy snow showers", "阵雪"},
+  {"Light showers of ice pellets", "小冰粒"},
+  {"Moderate or heavy showers of ice pellets", "冰粒"},
+  {"Patchy light rain with thunder", "雷阵雨"},
+  {"Moderate or heavy rain with thunder", "强雷阵雨"},
+  {"Patchy light snow with thunder", "雷阵雪"},
+  {"Moderate or heavy snow with thunder", "强雷阵雪"},
+};
+
+// 纯 ASCII 视为「服务端没翻译」
+static bool isPlainAscii(const String &s) {
+  for (unsigned int i = 0; i < s.length(); i++) {
+    if ((uint8_t)s[i] > 0x7F) return false;
+  }
+  return true;
+}
+
+// 去掉首尾空白（wttr.in 会返回 "Clear " 这种带空格的值）
+static String trimCopy(const String &s) {
+  int start = 0;
+  int end = (int)s.length();
+  while (start < end && isspace((unsigned char)s[start])) start++;
+  while (end > start && isspace((unsigned char)s[end - 1])) end--;
+  return s.substring(start, end);
+}
+
+static String weatherCodeToZh(int code) {
+  for (const auto &item : kWeatherZhCode) {
+    if (item.code == code) return String(item.zh);
+  }
+  return "";
+}
+
+static String weatherTextToZh(const String &en) {
+  String key = trimCopy(en);
+  if (key.isEmpty()) return "";
+  for (const auto &item : kWeatherZhText) {
+    if (key.equalsIgnoreCase(item.en)) return String(item.zh);
+  }
+  return "";
+}
+
+// 依次尝试：中文原文 -> 天气码 -> 英文描述 -> 英文描述(天气码位)
+static String translateWeatherDesc(int code, const String &langText, const String &enText) {
+  if (!langText.isEmpty() && !isPlainAscii(langText)) return trimCopy(langText);
+
+  String zh = weatherCodeToZh(code);
+  if (!zh.isEmpty()) return zh;
+
+  zh = weatherTextToZh(enText);
+  if (!zh.isEmpty()) return zh;
+
+  zh = weatherTextToZh(langText);
+  if (!zh.isEmpty()) return zh;
+
+  return trimCopy(langText.isEmpty() ? enText : langText);
+}
+
+// URL 编码：城市名是 UTF-8 中文，直接拼进 URL 遇到空格/特殊字符会请求失败
+static String urlEncode(const String &s) {
+  static const char hexDigits[] = "0123456789ABCDEF";
+  String out;
+  out.reserve(s.length() * 3);
+  for (unsigned int i = 0; i < s.length(); i++) {
+    uint8_t c = (uint8_t)s[i];
+    bool unreserved = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') ||
+                      (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~';
+    if (unreserved) {
+      out += (char)c;
+    } else {
+      out += '%';
+      out += hexDigits[c >> 4];
+      out += hexDigits[c & 0x0F];
+    }
+  }
+  return out;
+}
+
+// ---------------------------- 日月天文 ----------------------------
+// 这些字段本来就跟着 j1 响应一起返回，解析它们不需要额外请求
+String cachedSunrise;      // 原始值形如 "06:39 AM"
+String cachedSunset;       // 原始值形如 "05:17 PM"
+String cachedMoonPhase;    // 形如 "Waning Gibbous"
+int cachedMoonIllum = -1;  // 月面亮度 0~100，-1 表示未知
+bool cachedMoonWaxing = false; // true=盈月（右侧亮）
+
+// "06:39 AM" -> 一天中的分钟数；解析失败返回 -1
+static int clockToMinutes(const String &src) {
+  String s = trimCopy(src);
+  int colon = s.indexOf(':');
+  if (colon < 1) return -1;
+
+  int h = s.substring(0, colon).toInt();
+  int m = s.substring(colon + 1, colon + 3).toInt();
+  bool pm = s.indexOf("PM") >= 0 || s.indexOf("pm") >= 0;
+  bool am = s.indexOf("AM") >= 0 || s.indexOf("am") >= 0;
+
+  if (pm && h != 12) h += 12;
+  if (am && h == 12) h = 0;
+  if (h < 0 || h > 23 || m < 0 || m > 59) return -1;
+  return h * 60 + m;
+}
+
+// 统一成 24 小时制 "06:39"
+static String clockTo24(const String &src) {
+  int mins = clockToMinutes(src);
+  if (mins < 0) return trimCopy(src);
+  char buf[8];
+  snprintf(buf, sizeof(buf), "%02d:%02d", mins / 60, mins % 60);
+  return String(buf);
+}
+
+// 月相英文 -> 中文
+static String moonPhaseToZh(const String &phase) {
+  static const struct { const char *en; const char *zh; } kMoonName[] = {
+    {"New Moon", "新月"},        {"Waxing Crescent", "娥眉月"},
+    {"First Quarter", "上弦月"}, {"Waxing Gibbous", "盈凸月"},
+    {"Full Moon", "满月"},       {"Waning Gibbous", "亏凸月"},
+    {"Last Quarter", "下弦月"},  {"Waning Crescent", "残月"},
+  };
+  String key = trimCopy(phase);
+  if (key.isEmpty()) return "";
+  for (const auto &item : kMoonName) {
+    if (key.equalsIgnoreCase(item.en)) return String(item.zh);
+  }
+  return key;
+}
+
+// 用「整圆填满 + 偏移暗圆擦除」模拟月相盈亏，22~26px 直径下足够自然
+static void drawMoonPhase(int cx, int cy, int r, int illumPct, bool waxing) {
+  if (illumPct < 0) illumPct = 0;
+  if (illumPct > 100) illumPct = 100;
+
+  u8g2.drawDisc(cx, cy, r); // 先按满月铺满
+
+  int dx = (2 * r * illumPct) / 100; // 亮度越低，暗影圆越往中心压
+  if (dx < 2 * r) {
+    u8g2.setDrawColor(0);
+    u8g2.drawDisc(waxing ? cx - dx : cx + dx, cy, r + 1); // 背景色擦出暗面
+    u8g2.setDrawColor(1);
+  }
+  u8g2.drawCircle(cx, cy, r); // 补回月盘轮廓
+}
+
 // 统一获取所有天气数据，减少API调用次数
 bool getAllWeatherData() {
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
-    String apiUrl = "https://wttr.in/" + String(location) + "?lang=zh&format=j1";
-    http.begin(apiUrl.c_str());
-    int httpCode = http.GET();
-    if (httpCode == 200) {
-      String payload = http.getString();
+  if (WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
 
-      JsonDocument doc;
-      deserializeJson(doc, payload);
+  HTTPClient http;
+  String apiUrl = "https://wttr.in/" + urlEncode(location) + "?lang=zh&format=j1";
 
-      JsonArray weatherArray = doc["weather"];
-      if (!weatherArray.isNull() && weatherArray.size() > 0) {
-        JsonArray hourlyData = weatherArray[0]["hourly"];
-        if (!hourlyData.isNull() && hourlyData.size() > 0) {
-          // 获取当前小时对应的索引
-          int index = getCurrentHourIndex();
-          // 确保索引不超出范围
-          if (index < 0 || index >= hourlyData.size()) {
-            index = 0;
-          }
-          
-          JsonObject hourData = hourlyData[index];
-          
-          // 提取天气状况
-          JsonArray weatherDesc = hourData["lang_zh"];
-          if (!weatherDesc.isNull() && weatherDesc.size() > 0) {
-            String langData = weatherDesc[0]["value"].as<String>();
-            if (!langData.isEmpty()) {
-              cachedWeatherDesc = langData;
-            }
-          }
-          
-          // 提取温度
-          String tempC = hourData["tempC"].as<String>();
-          cachedTemperature = tempC + "°C";
-          
-          // 提取湿度
-          String humidity = hourData["humidity"].as<String>();
-          cachedHumidity = humidity + "%";
-          
-          // 提取体感温度
-          String feelsLike = hourData["FeelsLikeC"].as<String>();
-          cachedFeelsLike = feelsLike + "°C";
-          
-          return true;
+  bool updated = false;
+  if (!http.begin(apiUrl.c_str())) {
+    Serial.println("[weather] 连接初始化失败");
+    return false;
+  }
+
+  http.setTimeout(8000);                        // wttr.in 偶尔较慢，默认 5s 容易白跑
+  http.setUserAgent("ESP32-OLED-Weather/1.0");  // 明确 UA，避免服务端按客户端类型变格式
+
+  int httpCode = http.GET();
+  if (httpCode == 200) {
+    String payload = http.getString();
+
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, payload);
+    if (err) {
+      Serial.printf("[weather] JSON 解析失败: %s\n", err.c_str());
+    } else {
+      // 用 current_condition（实况）而不是 hourly 的 3 小时段：
+      // 实况跟设备时区无关，也不会因为查询外地城市而取错时段，且更贴近"目前天气"。
+      JsonArray ccArray = doc["current_condition"];
+      if (!ccArray.isNull() && ccArray.size() > 0) {
+        JsonObject cur = ccArray[0];
+
+        // 提取天气状况（以天气码为主，避免 lang_zh 缺译文时残留英文）
+        int weatherCode = cur["weatherCode"] | 0;
+
+        String enDesc;
+        JsonArray enDescArray = cur["weatherDesc"];
+        if (!enDescArray.isNull() && enDescArray.size() > 0) {
+          enDesc = enDescArray[0]["value"].as<String>();
         }
+
+        String langData;
+        JsonArray weatherDesc = cur["lang_zh"];
+        if (!weatherDesc.isNull() && weatherDesc.size() > 0) {
+          langData = weatherDesc[0]["value"].as<String>();
+        }
+
+        String zhDesc = translateWeatherDesc(weatherCode, langData, enDesc);
+        if (!zhDesc.isEmpty()) {
+          cachedWeatherDesc = zhDesc;
+        }
+
+        // 提取温度
+        cachedTemperature = cur["temp_C"].as<String>() + "°C";
+
+        // 提取湿度
+        cachedHumidity = cur["humidity"].as<String>() + "%";
+
+        // 提取体感温度
+        cachedFeelsLike = cur["FeelsLikeC"].as<String>() + "°C";
+
+        // 提取天文数据（同一次响应里就有，白拿）
+        JsonArray weatherArray = doc["weather"];
+        if (!weatherArray.isNull() && weatherArray.size() > 0) {
+          JsonObject astro = weatherArray[0]["astronomy"][0];
+          if (!astro.isNull()) {
+            String sunrise = astro["sunrise"].as<String>();
+            String sunset = astro["sunset"].as<String>();
+            String moonPhase = astro["moon_phase"].as<String>();
+            JsonVariant moonIllum = astro["moon_illumination"];
+
+            if (!sunrise.isEmpty()) cachedSunrise = sunrise;
+            if (!sunset.isEmpty()) cachedSunset = sunset;
+            if (!moonPhase.isEmpty()) {
+              cachedMoonPhase = moonPhase;
+              String lower = moonPhase;
+              lower.toLowerCase();
+              cachedMoonWaxing = lower.indexOf("waxing") >= 0;
+            }
+            if (!moonIllum.isNull()) cachedMoonIllum = moonIllum.as<int>();
+          }
+        }
+
+        updated = true;
+      } else {
+        Serial.println("[weather] 响应里没有 current_condition");
       }
     }
-    http.end();
+  } else {
+    Serial.printf("[weather] 请求失败，HTTP %d\n", httpCode);
   }
-  return false;
+
+  // 无论成功与否都必须释放连接，不能走 return 绕过
+  http.end();
+  return updated;
 }
 
 // 获取每日诗词
 bool getDailyPoem() {
-  if (WiFi.status() == WL_CONNECTED) {
-    HTTPClient http;
-    // 使用今日诗词API获取每日一句
-    String apiUrl = "https://v2.jinrishici.com/one.json";
-    http.begin(apiUrl.c_str());
-    http.addHeader("Content-Type", "application/json");
-    int httpCode = http.GET();
-    
-    if (httpCode == 200) {
-      String payload = http.getString();
-      JsonDocument doc;
-      deserializeJson(doc, payload);
-      
+  if (WiFi.status() != WL_CONNECTED) {
+    return false;
+  }
+
+  HTTPClient http;
+  String apiUrl = "https://v2.jinrishici.com/one.json";
+
+  bool updated = false;
+  if (!http.begin(apiUrl.c_str())) {
+    Serial.println("[poem] 连接初始化失败");
+    return false;
+  }
+
+  http.addHeader("Content-Type", "application/json");
+  http.setTimeout(8000);
+  http.setUserAgent("ESP32-OLED-Weather/1.0");
+  int httpCode = http.GET();
+
+  if (httpCode == 200) {
+    String payload = http.getString();
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, payload);
+    if (err) {
+      Serial.printf("[poem] JSON 解析失败: %s\n", err.c_str());
+    } else {
       // 解析诗词数据
       JsonObject data = doc["data"];
       if (!data.isNull()) {
         String content = data["content"].as<String>();
         if (!content.isEmpty()) {
           cachedPoem = content;
-          return true;
+          updated = true;
         }
       }
     }
-    http.end();
+  } else {
+    Serial.printf("[poem] 请求失败，HTTP %d\n", httpCode);
   }
-  return false;
-}
 
-// 获取当前小时的天气状况
-String getCurrentWeatherCondition() {
-  return cachedWeatherDesc.isEmpty() ? "未知" : cachedWeatherDesc;
-}
-
-// 获取当前小时的温度
-String getCurrentTemperature() {
-  return cachedTemperature.isEmpty() ? "未知" : cachedTemperature;
-}
-
-// 获取当前小时的湿度
-String getCurrentHumidity() {
-  return cachedHumidity.isEmpty() ? "未知" : cachedHumidity;
-}
-
-// 获取当前小时的体感温度
-String getCurrentFeelsLike() {
-  return cachedFeelsLike.isEmpty() ? "未知" : cachedFeelsLike;
+  http.end();
+  return updated;
 }
 
 // ------------------------------开始-------------------------------
 void setup(void) {
-  Serial.begin(9600);
+  Serial.begin(115200);
   u8g2.begin();
   u8g2.enableUTF8Print();
   u8g2.clearBuffer(); 
@@ -338,7 +598,7 @@ void setup(void) {
   u8g2.print("...");
   u8g2.setFont(u8g2_font_wqy12_t_gb2312);
   u8g2.setCursor(26, 50);
-  u8g2.print("Version 0.0.6");
+  u8g2.print("Version 0.0.8");
   u8g2.sendBuffer();
 
   // 加载配置
@@ -405,9 +665,13 @@ void setup(void) {
     Serial.println("请使用手机连接AP，访问 http://" + WiFi.softAPIP().toString() + " 进行配置");
   }
 
-  // 初始化按钮引脚
+  // 初始化按钮引脚与消抖状态
   pinMode(buttonPin, INPUT_PULLUP);
-  u8g2.clearBuffer(); 
+  btnLastRead = (digitalRead(buttonPin) == LOW);
+  btnStable = btnLastRead;
+  btnLastChange = millis();
+  lastScrollTime = millis();
+  u8g2.clearBuffer();
 }
 
 // 新增函数：获取格式化日期字符串
@@ -426,31 +690,30 @@ String getChineseWeekday(struct tm timeinfo) {
 // 定义上一次秒数，用于优化刷新频率
 int lastSecond = -1;
 
-// 按钮长按相关变量
-unsigned long buttonPressStartTime = 0;
-const unsigned long longPressDuration = 3000; // 长按3秒进入配置模式
-bool buttonPressed = false;
-
-// 绘制底部信息栏，包括湿度、指示器和温度
+// 绘制底部信息栏：左下湿度、中间页码指示、右下体感温度
 void drawBottomInfo(int activePage) {
-  // 左下角湿度
   u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+
+  // 左下角湿度
   u8g2.setCursor(4, 60);
-  u8g2.print(cachedHumidity);
-  
+  u8g2.print(cachedHumidity.isEmpty() ? "--" : cachedHumidity);
+
   // 指示器（当前页为实心圆，其他为空心圆）
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < pageCount; i++) {
     if (i == activePage) {
-      u8g2.drawDisc(48 + i * 10, 56, 2); // 实心圆
+      u8g2.drawDisc(44 + i * 9, 56, 2); // 实心圆
     } else {
-      u8g2.drawCircle(48 + i * 10, 56, 2); // 空心圆
+      u8g2.drawCircle(44 + i * 9, 56, 2); // 空心圆
     }
   }
-  
-  // 右下角天气温度
-  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
-  u8g2.setCursor(100, 60);
-  u8g2.print(cachedTemperature);
+
+  // 右下角体感温度：右对齐，避免 "-10°C" 这种长文本顶出屏幕右边界
+  String feels = cachedFeelsLike.isEmpty() ? "--" : cachedFeelsLike;
+  int feelsWidth = u8g2.getUTF8Width(feels.c_str());
+  int feelsX = 123 - feelsWidth;
+  if (feelsX < 84) feelsX = 84; // 不要压到页码指示器（最右圆点到 x=80）
+  u8g2.setCursor(feelsX, 60);
+  u8g2.print(feels);
 }
 
 // 绘制通用边框和分割线
@@ -497,10 +760,16 @@ void drawPage1() {
   u8g2.print(title);
   
   // 中间显示内容：天气状况|温度|湿度，根据屏幕宽度自动居中
-  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  // 中文描述可能较长（如"零星雨夹雪"），超宽时自动降一档字体，避免左右溢出
   String weatherInfo = cachedWeatherDesc + "|" + cachedTemperature + "|" + cachedHumidity;
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
   int weatherInfoWidth = u8g2.getUTF8Width(weatherInfo.c_str());
+  if (weatherInfoWidth > 122) {
+    u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+    weatherInfoWidth = u8g2.getUTF8Width(weatherInfo.c_str());
+  }
   int weatherInfoX = (128 - weatherInfoWidth) / 2;
+  if (weatherInfoX < 1) weatherInfoX = 1;
   u8g2.setCursor(weatherInfoX, 40); 
   u8g2.print(weatherInfo);
   
@@ -508,6 +777,35 @@ void drawPage1() {
   drawCommonBorder();
   // 绘制底部信息
   drawBottomInfo(1);
+}
+
+// 只绘制诗词滚动区文字（供整屏重绘和局部刷新共用）
+void drawPoemText() {
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  String poem = cachedPoem.isEmpty() ? "加载中..." : cachedPoem;
+  int poemWidth = u8g2.getUTF8Width(poem.c_str());
+
+  const int poemGap = 20;                              // 两段诗词之间的间隔
+  int totalScrollWidth = poemWidth + poemGap;
+  int currentX = 3 - (int)(scrollPosition % totalScrollWidth);
+
+  // 主实例
+  u8g2.setCursor(currentX, 40);
+  u8g2.print(poem);
+
+  // 循环实例，实现无缝衔接
+  int nextX = currentX + totalScrollWidth;
+  if (nextX < 125) {
+    u8g2.setCursor(nextX, 40);
+    u8g2.print(poem);
+  }
+}
+
+// 局部刷新：只重发中间 3 行 tile（y=24~47），不重发整屏 1KB
+void refreshPoemArea() {
+  u8g2.clearBuffer();
+  drawPoemText();
+  u8g2.updateDisplayArea(0, 3, 16, 3); // tx, ty, tw, th（单位 8px tile）
 }
 
 void drawPage2() {
@@ -531,41 +829,8 @@ void drawPage2() {
   u8g2.print(title);
   
   // 中间内容：滚动显示每日诗词
-  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
-  String poem = cachedPoem.isEmpty() ? "加载中..." : cachedPoem;
-  int poemWidth = u8g2.getUTF8Width(poem.c_str());
-  
-  // 计算可显示宽度：屏幕总宽度128 - 左右各预留3像素 = 122像素
-  const int displayWidth = 128 - 3 - 3;
-  
-  // 更新滚动位置 - 连续更新多次，提高滚动速度
-  unsigned long currentTime = millis();
-  // 计算自上次滚动以来应该更新的次数
-  if (currentTime - lastScrollTime >= scrollInterval) {
-    // 计算需要更新的次数
-    int updateCount = (currentTime - lastScrollTime) / scrollInterval;
-    scrollPosition += updateCount;
-    lastScrollTime = currentTime;
-  }
-  
-  // 计算诗词宽度和间隔距离
-  int poemGap = 20; // 诗词之间的间隔距离（像素）
-  int totalScrollWidth = poemWidth + poemGap;
-  
-  // 计算当前显示位置
-  int currentX = 3 - (scrollPosition % totalScrollWidth);
-  
-  // 绘制诗句（主实例）
-  u8g2.setCursor(currentX, 40); 
-  u8g2.print(poem);
-  
-  // 绘制诗句（循环实例，用于无缝滚动）
-  int nextX = currentX + totalScrollWidth;
-  if (nextX < displayWidth + 3) {
-    u8g2.setCursor(nextX, 40);
-    u8g2.print(poem);
-  }
-  
+  drawPoemText();
+
   // 绘制通用边框和分割线
   drawCommonBorder();
   // 绘制底部信息
@@ -589,119 +854,242 @@ void drawPage3() {
   drawBottomInfo(3);
 }
 
+// ------------------------第五页：日月星辰----------------------------------
+void drawPage4(struct tm &timeinfo) {
+  int nowMin = timeinfo.tm_hour * 60 + timeinfo.tm_min;
+  int riseMin = clockToMinutes(cachedSunrise);
+  int setMin = clockToMinutes(cachedSunset);
+
+  // 标题
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  u8g2.setCursor(4, 15);
+  u8g2.print("日月星辰");
+
+  // 右上角：距最近一次日出/日落的倒计时（上箭头=等日出，下箭头=等日落）
+  if (riseMin >= 0 && setMin >= 0) {
+    bool isDay = (nowMin >= riseMin && nowMin <= setMin);
+    int delta;
+    if (isDay) {
+      delta = setMin - nowMin;
+    } else if (nowMin > setMin) {
+      delta = 1440 - nowMin + riseMin; // 跨午夜
+    } else {
+      delta = riseMin - nowMin;
+    }
+
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%dh%02dm", delta / 60, delta % 60);
+
+    u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+    int cdWidth = u8g2.getUTF8Width(buf);
+    int cdX = 124 - cdWidth;
+    if (cdX < 72) cdX = 72; // 不要压到左侧标题
+
+    // 小箭头：向上=日出倒计时，向下=日落倒计时
+    int arrowX = cdX - 7;
+    if (isDay) {
+      u8g2.drawTriangle(arrowX + 2, 12, arrowX, 6, arrowX + 4, 6);
+    } else {
+      u8g2.drawTriangle(arrowX + 2, 6, arrowX, 12, arrowX + 4, 12);
+    }
+
+    u8g2.setCursor(cdX, 15);
+    u8g2.print(buf);
+  }
+
+  // 左侧：真实盈亏的月相图
+  if (cachedMoonIllum >= 0) {
+    drawMoonPhase(26, 35, 12, cachedMoonIllum, cachedMoonWaxing);
+  } else {
+    u8g2.drawCircle(26, 35, 12);
+  }
+
+  // 右侧：月相中文名 + 亮度
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  String phaseZh = moonPhaseToZh(cachedMoonPhase);
+  u8g2.setCursor(46, 32);
+  u8g2.print(phaseZh.isEmpty() ? "月相 --" : phaseZh);
+
+  if (cachedMoonIllum >= 0) {
+    u8g2.setCursor(46, 45);
+    u8g2.print(String("亮 ") + cachedMoonIllum + "%");
+  }
+
+  // 底部：日出 / 日落时刻（统一成 24 小时制）
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.setCursor(2, 61);
+  u8g2.print(String("日出 ") + (cachedSunrise.isEmpty() ? "--" : clockTo24(cachedSunrise)));
+
+  String sunsetText = String("日落 ") + (cachedSunset.isEmpty() ? "--" : clockTo24(cachedSunset));
+  int sunsetWidth = u8g2.getUTF8Width(sunsetText.c_str());
+  u8g2.setCursor(126 - sunsetWidth, 61);
+  u8g2.print(sunsetText);
+}
+
 // ------------------------------执行-------------------------------
+
+// 整屏重绘（所有页面共用）
+void renderFullScreen(struct tm &timeinfo) {
+  char timeStringBuff[50];
+  strftime(timeStringBuff, sizeof(timeStringBuff), "%H:%M:%S", &timeinfo);
+
+  u8g2.clearBuffer();
+  switch (currentPage) {
+    case 0: drawPage0(timeinfo, timeStringBuff); break;
+    case 1: drawPage1(); break;
+    case 2: drawPage2(); break;
+    case 3: drawPage3(); break;
+    case 4: drawPage4(timeinfo); break;
+  }
+  u8g2.sendBuffer();
+}
+
+// 等待 NTP 授时的提示画面：告诉用户「在干嘛」，而不是停在上电画面不动
+void drawSyncScreen() {
+  static int dots = 0;
+
+  u8g2.clearBuffer();
+  drawCommonBorder();
+
+  u8g2.setFont(u8g2_font_wqy14_t_gb2312);
+  String tip = "正在同步时间";
+  for (int i = 0; i < (dots % 4); i++) {
+    tip += ".";
+  }
+  int tipWidth = u8g2.getUTF8Width(tip.c_str());
+  u8g2.setCursor((128 - tipWidth) / 2, 38);
+  u8g2.print(tip);
+
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  String net = (WiFi.status() == WL_CONNECTED) ? "网络已连接" : "网络未连接";
+  int netWidth = u8g2.getUTF8Width(net.c_str());
+  u8g2.setCursor((128 - netWidth) / 2, 59);
+  u8g2.print(net);
+
+  u8g2.sendBuffer();
+  dots++;
+}
+
+// 长按进配置模式：只清 WiFi，保留城市等其它设置（避免误触后连城市都要重配）
+void enterConfigMode() {
+  u8g2.clearBuffer();
+  drawCommonBorder();
+  u8g2.setFont(u8g2_font_wqy12_t_gb2312);
+  u8g2.setCursor(12, 37);
+  u8g2.print("清除 WiFi 配置");
+  u8g2.setCursor(28, 52);
+  u8g2.print("重新配置中...");
+  u8g2.sendBuffer();
+
+  preferences.begin("oled_weather", false);
+  preferences.remove("ssid");
+  preferences.remove("password");
+  preferences.end();
+
+  Serial.println("[ui] 已清除 WiFi 配置，重启进入配置模式");
+  delay(600);
+  ESP.restart();
+}
+
+// 按钮轮询：30ms 消抖；短按切页，长按 3 秒进配置
+void pollButton() {
+  bool raw = (digitalRead(buttonPin) == LOW);
+  unsigned long now = millis();
+
+  if (raw != btnLastRead) {
+    btnLastRead = raw;
+    btnLastChange = now;
+    return; // 电平还在跳，等稳定
+  }
+  if (now - btnLastChange < debounceMs) {
+    return; // 稳定时间不够，先不算数
+  }
+  if (raw == btnStable) {
+    return; // 状态没变化
+  }
+
+  btnStable = raw;
+  if (btnStable) {
+    btnPressStart = now;
+    btnLongPressFired = false;
+    return;
+  }
+
+  // 释放：没触发过长按且按住不足 3 秒，算一次短按
+  if (!btnLongPressFired && now - btnPressStart < longPressDuration) {
+    currentPage = (currentPage + 1) % pageCount;
+    scrollPosition = 0;
+    lastScrollTime = millis();
+    needsFullRedraw = true;
+    Serial.printf("[ui] 切换到第 %d 页\n", currentPage + 1);
+  }
+}
+
+// 长按检测：与消抖解耦，按住期间持续判断
+void checkLongPress() {
+  if (btnStable && !btnLongPressFired && millis() - btnPressStart >= longPressDuration) {
+    btnLongPressFired = true;
+    Serial.println("[ui] 长按触发，进入配置模式");
+    enterConfigMode();
+  }
+}
+
 void loop(void) {
-  // 如果在配置模式，处理Web请求
+  // 配置模式：只处理 Web 请求
   if (config_mode) {
     server.handleClient();
     delay(100);
     return;
   }
 
+  // WiFi 掉线自动重连；刚恢复时把下次刷新提前到 5 秒后（留时间给 DHCP）
+  if (ensureWiFi()) {
+    previousMillis = millis() - interval + 5000;
+  }
+
+  // 定时拉数据，与当前停在哪个页面无关
+  if (millis() - previousMillis >= interval) {
+    previousMillis = millis();
+    getAllWeatherData();
+    getDailyPoem();
+    needsFullRedraw = true;
+  }
+
+  pollButton();
+  checkLongPress();
+
   struct tm timeinfo;
-  if(!getLocalTime(&timeinfo)){
-    Serial.println("Failed to obtain time");
-    delay(100);
+  if (!getLocalTime(&timeinfo)) {
+    // 还没对上时间：给提示画面，按键逻辑照常运行
+    static unsigned long lastSyncDraw = 0;
+    if (millis() - lastSyncDraw >= 500) {
+      lastSyncDraw = millis();
+      drawSyncScreen();
+    }
+    delay(50);
     return;
   }
 
-  // 检测按钮状态（独立于秒数变化，实时检测）
-  if (digitalRead(buttonPin) == LOW) {
-    // 按钮按下
-    if (!buttonPressed) {
-      buttonPressed = true;
-      buttonPressStartTime = millis();
+  // 诗词页走局部刷新（80ms 一帧），比每秒整屏重绘流畅得多
+  if (currentPage == 2 && !needsFullRedraw) {
+    unsigned long now = millis();
+    if (now - lastScrollTime >= scrollInterval) {
+      unsigned long steps = (now - lastScrollTime) / scrollInterval;
+      scrollPosition += steps;
+      lastScrollTime += steps * scrollInterval;
+      refreshPoemArea();
     }
-    
-    // 检查是否长按超过3秒
-    if (millis() - buttonPressStartTime >= longPressDuration) {
-      // 进入配置模式
-      Serial.println("长按按钮，进入配置模式");
-      // 清除WiFi配置，让设备重启后进入配置模式
-      preferences.begin("oled_weather", false);
-      preferences.clear();
-      preferences.end();
-      // 重启设备，进入配置模式
-      ESP.restart();
-    }
-  } else {
-    // 按钮释放
-    if (buttonPressed) {
-      buttonPressed = false;
-      // 检查是否是短按（小于3秒）
-      if (millis() - buttonPressStartTime < longPressDuration) {
-        // 切换页面
-        currentPage = (currentPage + 1) % 4;
-        
-        // 立即重新绘制屏幕，响应页面切换
-        char timeStringBuff[50];
-        // 格式化时间
-        strftime(timeStringBuff, sizeof(timeStringBuff), "%H:%M:%S", &timeinfo);
-        
-        u8g2.clearBuffer(); 
-        u8g2.firstPage();
-        do {
-          switch (currentPage) {
-            case 0:
-              drawPage0(timeinfo, timeStringBuff);
-              break;
-            case 1:
-              drawPage1();
-              break;
-            case 2:
-              drawPage2();
-              break;
-            case 3:
-              drawPage3();
-              break;
-          }
-        } while (u8g2.nextPage());
-      }
-    }
+    delay(20);
+    return;
   }
 
-  // 只有当秒数变化时才重新绘制屏幕，减少掉帧
-  if (timeinfo.tm_sec != lastSecond) {
+  // 其它页面：切页或秒变化时整屏重绘
+  if (needsFullRedraw || timeinfo.tm_sec != lastSecond) {
     lastSecond = timeinfo.tm_sec;
-
-    char timeStringBuff[50];
-    char timeStringWithoutSec[50];
-
-    // 格式化时间
-    strftime(timeStringBuff, sizeof(timeStringBuff), "%H:%M:%S", &timeinfo);
-    // 格式化时间（不显示秒）
-    strftime(timeStringWithoutSec, sizeof(timeStringWithoutSec), "%H:%M", &timeinfo);
-
-    // 获取当前时间
-    unsigned long currentMillis = millis();
-
-    // 每10分钟统一更新一次所有天气数据和每日诗词
-    if (currentMillis - previousMillis >= interval) {
-      previousMillis = currentMillis;
-      getAllWeatherData();
-      getDailyPoem();
-    }
-
-    u8g2.clearBuffer(); 
-    u8g2.firstPage();
-    do {
-      switch (currentPage) {
-            case 0:
-              drawPage0(timeinfo, timeStringBuff);
-              break;
-            case 1:
-              drawPage1();
-              break;
-            case 2:
-              drawPage2();
-              break;
-            case 3:
-              drawPage3();
-              break;
-          }
-    } while (u8g2.nextPage());
+    needsFullRedraw = false;
+    renderFullScreen(timeinfo);
+    return;
   }
-  
-  // 短延迟，减少CPU占用
-  delay(50); 
+
+  delay(20);
 }
